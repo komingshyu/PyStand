@@ -13,6 +13,7 @@
 #include "PyStand.h"
 #include <shlwapi.h>
 #include <string>
+#include <string.h>
 #include <winbase.h>
 #include <wincon.h>
 
@@ -68,12 +69,13 @@ PyStand::PyStand(const char *runtime)
 //---------------------------------------------------------------------
 std::wstring PyStand::Ansi2Unicode(const char *text)
 {
-	int require = (int)strlen(text) * 2 + 10;
+	int len = (int)strlen(text);
 	std::wstring wide;
-	wide.resize(require + 2);
-	MultiByteToWideChar(CP_ACP, 0, text, -1, &wide[0], require);
-	int size = wcslen(wide.c_str());
-	wide.resize(size);
+	int require = MultiByteToWideChar(CP_ACP, 0, text, len, NULL, 0);
+	if (require > 0) {
+		wide.resize(require);
+		MultiByteToWideChar(CP_ACP, 0, text, len, &wide[0], require);
+	}
 	return wide;
 }
 
@@ -260,10 +262,11 @@ int PyStand::RunString(const char *script)
 int PyStand::DetectScript()
 {
 	// init: _script (init script like PyStand.int or PyStand.py)
-	int size = (int)_pystand.size();
-	for (; size > 0; size--) {
+	int size = (int)_pystand.size() - 1;
+	for (; size >= 0; size--) {
 		if (_pystand[size] == L'.') break;
 	}
+	if (size < 0) size = (int)_pystand.size();
 	std::wstring main = _pystand.substr(0, size);
 	std::vector<const wchar_t*> exts;
 	std::vector<std::wstring> scripts;
@@ -320,18 +323,30 @@ const char *init_script =
 "    sys.stdout = fp\n"
 "    sys.stderr = fp\n"
 "except Exception as e:\n"
-"    pass\n"
+"    fp = open(os.devnull, 'w')\n"
+"    sys.stdout = fp\n"
+"    sys.stderr = fp\n"
 #endif
 "for n in ['.', 'lib', 'site-packages']:\n"
 "    test = os.path.abspath(os.path.join(PYSTAND_HOME, n))\n"
 "    if os.path.exists(test):\n"
-"       site.addsitedir(test)\n"
+"        site.addsitedir(test)\n"
 "sys.argv = [PYSTAND_SCRIPT] + sys.argv[1:]\n"
 "text = open(PYSTAND_SCRIPT, 'rb').read()\n"
 "code = compile(text, PYSTAND_SCRIPT, 'exec')\n"
 "environ = {'__file__': PYSTAND_SCRIPT, '__name__': '__main__'}\n"
 "environ['__package__'] = None\n"
+#ifndef PYSTAND_CONSOLE
+"try:\n"
+"    exec(code, environ)\n"
+"except:\n"
+"    import traceback, io\n"
+"    sio = io.StringIO()\n"
+"    traceback.print_exc(file = sio)\n"
+"    os.MessageBox(sio.getvalue(), 'Error')\n"
+#else
 "exec(code, environ)\n"
+#endif
 "";
 
 
@@ -341,6 +356,8 @@ const char *init_script =
 
 //! flag: -static
 //! src: 
+//! link: stdc++, shlwapi, resource.o
+//! prebuild: windres resource.rc -o resource.o
 //! mode: win
 //! int: objs
 
